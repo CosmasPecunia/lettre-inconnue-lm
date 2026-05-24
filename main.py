@@ -11,8 +11,8 @@ with open("lettre_dune_inconnue.txt", "r", encoding="utf-8") as f:
 # Build vocabulary: sorted list of unique characters
 chars = sorted(list(set(text)))
 caracters_nbr = len(chars)
-print(len(text))        # Total number of characters in the text
-print(caracters_nbr)    # Number of unique characters (vocabulary size)
+#print(len(text))        # Total number of characters in the text
+#print(caracters_nbr)    # Number of unique characters (vocabulary size)
 
 # Create mappings: character -> index and index -> character
 stoi = {ch: i for i, ch in enumerate(chars)}
@@ -24,6 +24,10 @@ encode = lambda s: [stoi[c] for c in s]
 decode = lambda l: ''.join([itos[i] for i in l])
 # convert the entire text into a tensor of integers
 data = torch.tensor(encode(text), dtype=torch.long)
+
+split = int(0.9*len(data))
+train_data = data[:split]
+val_data = data[split:]
 
 # Define context window size and number of sequences per batch
 block_size = 8
@@ -44,13 +48,72 @@ def get_batch(data, batch_size, block_size):
         y.append(data[start + 1: block_size + start + 1])   # Target sequence (shift by 1)
     return torch.stack(x), torch.stack(y)
 
-# generate a batch of data
-x, y = get_batch(data, batch_size, block_size)
+class Model_language(nn.Module):
+    def __init__(self, vocab_size):
+        super().__init__()
+        # The embedding table IS the model
+        # Each row = scores (logits) for the next character
+        self.embedding = nn.Embedding(vocab_size, vocab_size)
 
-# Create an embedding layer: maps each character index to a 32 dimensional vector
-embedding_layer = nn.Embedding(num_embeddings=len(chars), embedding_dim=32)
+    def forward(self, x, targets=None):
+        # x shape: (B, T)
+        # logits shape: (B, T, vocab_size)
+        logits = self.embedding(x)
 
-# pass the batch through the embedding layer
-# Output shape: (batch_size, block_size, embedding_dim) -> (4, 8, 32)
-vecteur = embedding_layer(x)
-print(vecteur)
+        if targets is None:
+            loss = None
+        else:
+            # Reshape for CrossEntropyLoss
+            B, T, C = logits.shape
+            logits = logits.view(B * T, C)   # (B*T, vocab_size)
+            targets = targets.view(B * T)     # (B*T)
+            loss = torch.nn.functional.cross_entropy(logits, targets)
+
+        return logits, loss
+
+    def generate(self, x, max_new_tokens):
+        """
+        Generate max_new_tokens new characters given a starting context x.
+        """
+        for _ in range(max_new_tokens):
+            # Get predictions
+            logits, _ = self(x)
+            # Focus only on the last character
+            logits = logits[:, -1, :]            # (B, caracters_nbr)
+            # Convert logits to probabilities
+            probs = torch.nn.functional.softmax(logits, dim=-1)    # (B, caracters_nbr)
+            # Sample the next character
+            next_char = torch.multinomial(probs, num_samples=1)  # (B, 1)
+            # append to the sequence
+            x = torch.cat([x, next_char], dim=1)                 # (B, T+1)
+        return x
+
+
+model = Model_language(caracters_nbr)
+
+# AdamW optimizer
+optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
+
+# Training loop
+epochs = 10000
+for step in range(epochs):
+    # Get a batch
+    x, y = get_batch(train_data, batch_size, block_size)
+
+    # Forward pass
+    logits, loss = model(x, y)
+    # backward pass
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
+    # print loss 
+    if step % 1000 == 0:
+        print(f"Step {step} | Loss: {loss.item():.4f}")
+
+
+# Generate text
+# Start from a blank characte
+context = torch.zeros((1, 1), dtype=torch.long)
+generated = model.generate(context, max_new_tokens=200)
+print("\n--- Generate Text ---")
+print(decode(generated[0].tolist()))
