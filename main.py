@@ -57,7 +57,7 @@ class Model_language(nn.Module):
 
     def forward(self, x, targets=None):
         # x shape: (B, T)
-        # logits shape: (B, T, vocab_size)
+        # logits shape: (B, T, caracters_nbr)
         logits = self.embedding(x)
 
         if targets is None:
@@ -65,7 +65,7 @@ class Model_language(nn.Module):
         else:
             # Reshape for CrossEntropyLoss
             B, T, C = logits.shape
-            logits = logits.view(B * T, C)   # (B*T, vocab_size)
+            logits = logits.view(B * T, C)   # (B*T, caracters_nbr)
             targets = targets.view(B * T)     # (B*T)
             loss = torch.nn.functional.cross_entropy(logits, targets)
 
